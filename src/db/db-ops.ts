@@ -32,10 +32,5 @@ export async function verifyDatabaseConnection(): Promise<void> {
   }
 }
 
-verifyDatabaseConnection()
-  .then(() => {
-    console.log("Database connection successful.");
-  })
-  .catch((error) => {
-    console.error("Database connection failed:", error);
-  });
+//we need multiple db ops funcs, and we will export them from this file.
+//insertNewPost, getPostByTelegramMessageId, updatePostContent, deletePost, getPostVersions, getAllPosts etc. will be implemented here as needed. For now, we have the verifyDatabaseConnection function to check connectivity.

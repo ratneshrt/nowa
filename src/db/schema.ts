@@ -17,13 +17,8 @@ export const posts = pgTable("posts", {
     .unique(),
   authorTelegramId: bigint("author_telegram_id", { mode: "number" }).notNull(),
   content: text("content").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow()
-    .$onUpdate(() => new Date()),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   editCount: integer("edit_count").notNull().default(0),
   deleted: boolean("deleted").notNull().default(false),
 });
@@ -38,9 +33,7 @@ export const postVersions = pgTable(
     editNumber: integer("edit_number").notNull(),
     contentSnapshot: text("content_snapshot").notNull(),
     editedBy: bigint("edited_by", { mode: "number" }).notNull(),
-    editedAt: timestamp("edited_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    editedAt: timestamp("edited_at", { withTimezone: true }).notNull(),
   },
   (table) => ({
     editSequenceIdx: uniqueIndex("post_versions_post_id_edit_number_idx").on(
