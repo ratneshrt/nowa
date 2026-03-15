@@ -4,7 +4,7 @@ import {
   getAllEdits,
   getPostTotals,
   shutdownDatabasePool,
-} from "./db/db-ops";
+} from "../db/db-ops";
 
 async function main(): Promise<void> {
   try {

@@ -2,12 +2,12 @@ import "dotenv/config";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { Telegraf, Context } from "telegraf";
-import { posts } from "./db/schema";
+import { posts } from "../db/schema";
 import {
   insertNewPost,
   softDeletePost,
   updatePostContent,
-} from "./db/db-ops";
+} from "../db/db-ops";
 
 type AllowedUserMap = Record<string, true>;
 
@@ -456,6 +456,7 @@ export async function startLoggingBot(): Promise<void> {
             authorTelegramId: payload.authorTelegramId,
             content: payload.content,
             timestamp: new Date(payload.createdAt),
+            origin: "tg",
           });
           if (inserted) {
             responseDescription = "Post stored.";

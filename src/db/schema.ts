@@ -3,12 +3,15 @@ import {
   bigint,
   boolean,
   integer,
+  pgEnum,
   pgTable,
   text,
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
+
+export const originEnum = pgEnum("origin_type", ["tg", "cli"]);
 
 export const posts = pgTable("posts", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -21,6 +24,7 @@ export const posts = pgTable("posts", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   editCount: integer("edit_count").notNull().default(0),
   deleted: boolean("deleted").notNull().default(false),
+  origin: originEnum("origin").notNull().default("cli"),
 });
 
 export const postVersions = pgTable(
@@ -34,6 +38,7 @@ export const postVersions = pgTable(
     contentSnapshot: text("content_snapshot").notNull(),
     editedBy: bigint("edited_by", { mode: "number" }).notNull(),
     editedAt: timestamp("edited_at", { withTimezone: true }).notNull(),
+    origin: originEnum("origin").notNull().default("cli"),
   },
   (table) => ({
     editSequenceIdx: uniqueIndex("post_versions_post_id_edit_number_idx").on(

@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { posts } from "./db/schema";
+import { posts } from "../../db/schema";
 
 const exampleTimestamp = new Date();
 

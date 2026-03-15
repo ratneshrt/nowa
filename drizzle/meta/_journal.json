@@ -15,6 +15,20 @@
       "when": 1772741948060,
       "tag": "0001_small_toxin",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1773097780915,
+      "tag": "0002_fuzzy_chameleon",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1773098244752,
+      "tag": "0003_remarkable_rumiko_fujikawa",
+      "breakpoints": true
     }
   ]
 }
