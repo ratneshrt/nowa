@@ -13,10 +13,8 @@ import {
 
 type AllowedUserMap = Record<string, true>;
 
-function buildAllowedUsers(): AllowedUserMap {
+function parseAllowedUsernames(raw: string): AllowedUserMap {
   const map: AllowedUserMap = {};
-  const raw = process.env.ALLOWED_USERNAMES ?? "";
-
   raw
     .split(",")
     .map((username) => username.trim().toLowerCase())
@@ -24,11 +22,8 @@ function buildAllowedUsers(): AllowedUserMap {
     .forEach((username) => {
       map[username] = true;
     });
-
   return map;
 }
-
-const allowedUsers = buildAllowedUsers();
 
 const KNOWN_COMMANDS = new Set(["delete", "which", "last", "restore"]);
 
@@ -38,7 +33,7 @@ type ReferenceableMessage = {
   reply_to_message?: ReferenceableMessage;
 };
 
-function isUserAllowed(ctx: Context): boolean {
+function isUserAllowed(ctx: Context, allowedUsers: AllowedUserMap): boolean {
   const username = ctx.from?.username?.toLowerCase();
   if (!username) return false;
   return Boolean(allowedUsers[username]);
@@ -169,18 +164,9 @@ async function sendMessage(
   } as Record<string, unknown>);
 }
 
-export async function startLoggingBot(): Promise<void> {
-  const botToken = process.env.BOT_TOKEN;
-  if (!botToken) {
-    throw new Error(
-      "BOT_TOKEN is missing. Set it in your environment to run the bot."
-    );
-  }
-
-  const bot = new Telegraf(botToken);
-
+function attachMessageHandlers(bot: Telegraf, allowedUsers: AllowedUserMap): void {
   bot.on("message", async (ctx) => {
-    if (!isUserAllowed(ctx)) {
+    if (!isUserAllowed(ctx, allowedUsers)) {
       console.warn(
         "Unauthorized message from",
         ctx.from?.username ?? ctx.from?.id ?? "unknown user"
@@ -353,6 +339,30 @@ export async function startLoggingBot(): Promise<void> {
       await sendMessage(ctx, chatId, incomingMessage.message_id, response);
     }
   });
+}
+
+// For production (CF Workers webhook mode): create a configured bot instance
+// without starting long polling. The caller is responsible for calling
+// bot.handleUpdate(update) per incoming Telegram update.
+export function createBot(token: string, allowedUsernamesStr: string): Telegraf {
+  const allowedUsers = parseAllowedUsernames(allowedUsernamesStr);
+  const bot = new Telegraf(token);
+  attachMessageHandlers(bot, allowedUsers);
+  return bot;
+}
+
+// For local dev: start the bot with long polling.
+export async function startLoggingBot(): Promise<void> {
+  const botToken = process.env.BOT_TOKEN;
+  if (!botToken) {
+    throw new Error(
+      "BOT_TOKEN is missing. Set it in your environment to run the bot."
+    );
+  }
+
+  const allowedUsers = parseAllowedUsernames(process.env.ALLOWED_USERNAMES ?? "");
+  const bot = new Telegraf(botToken);
+  attachMessageHandlers(bot, allowedUsers);
 
   await bot.launch();
   console.log("Telegraf bot is running (long polling). Press Ctrl+C to stop.");
@@ -366,7 +376,7 @@ export async function startLoggingBot(): Promise<void> {
   process.once("SIGTERM", () => shutdown("SIGTERM"));
 }
 
-if (require.main === module) {
+if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {
   startLoggingBot().catch((error) => {
     console.error("Bot failed to start:", error);
     process.exitCode = 1;

@@ -4,3 +4,4 @@ node_modules
 .pnpm-store
 CLAUDE.md
 architecture.md
+DEPLOY.md

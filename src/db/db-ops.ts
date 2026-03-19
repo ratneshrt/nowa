@@ -1,7 +1,6 @@
-import "dotenv/config";
 import { and, desc, eq, lt, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
+import { drizzle } from "drizzle-orm/neon-http";
+import { neon } from "@neondatabase/serverless";
 import { postVersions, posts } from "./schema";
 
 type PostRecord = typeof posts.$inferSelect;
@@ -49,7 +48,6 @@ type PaginatedPosts = {
 
 type DrizzleDb = ReturnType<typeof drizzle>;
 
-let sharedPool: Pool | null = null;
 let sharedDb: DrizzleDb | null = null;
 
 function requireDatabaseUrl(): string {
@@ -68,18 +66,19 @@ function getDb(): DrizzleDb {
   }
 
   const databaseUrl = requireDatabaseUrl();
-  sharedPool = new Pool({ connectionString: databaseUrl });
-  sharedDb = drizzle(sharedPool);
+  sharedDb = drizzle(neon(databaseUrl));
   return sharedDb;
 }
 
+// Called by the CF Worker before any route runs to initialize the DB singleton
+// using the env binding rather than process.env. Idempotent — safe to call on
+// every request (returns immediately if already initialized).
+export function initDb(connectionString: string): void {
+  if (sharedDb) return;
+  sharedDb = drizzle(neon(connectionString));
+}
+
 export async function shutdownDatabasePool(): Promise<void> {
-  if (sharedPool) {
-    await sharedPool.end().catch(() => {
-      /* ignore */
-    });
-  }
-  sharedPool = null;
   sharedDb = null;
 }
 
