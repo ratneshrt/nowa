@@ -1,0 +1,1 @@
+ALTER TABLE "post_versions" ALTER COLUMN "edited_by" DROP NOT NULL;

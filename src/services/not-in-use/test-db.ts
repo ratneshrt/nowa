@@ -1,19 +1,10 @@
 import "dotenv/config";
+import { nanoid } from "nanoid";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { posts } from "../../db/schema";
 
 const exampleTimestamp = new Date();
-
-const examplePost = {
-  telegramMessageId: 500999001,
-  authorTelegramId: 777111222,
-  content: `Example post created via seed helper at ${exampleTimestamp.toISOString()}`,
-  createdAt: exampleTimestamp,
-  updatedAt: exampleTimestamp,
-  editCount: 0,
-  deleted: false,
-} as const;
 
 export async function insertExamplePost() {
   const databaseUrl = process.env.DATABASE_URL;
@@ -24,18 +15,20 @@ export async function insertExamplePost() {
 
   const pool = new Pool({ connectionString: databaseUrl });
   const db = drizzle(pool);
+  const telegramMessageId = 500999001;
 
   try {
     const [inserted] = await db
       .insert(posts)
       .values({
-        telegramMessageId: examplePost.telegramMessageId,
-        authorTelegramId: examplePost.authorTelegramId,
-        content: examplePost.content,
-        createdAt: examplePost.createdAt,
-        updatedAt: examplePost.updatedAt,
-        editCount: examplePost.editCount,
-        deleted: examplePost.deleted,
+        uid: nanoid(10),
+        telegramMessageId,
+        authorTelegramId: 777111222,
+        content: `Example post created via seed helper at ${exampleTimestamp.toISOString()}`,
+        createdAt: exampleTimestamp,
+        updatedAt: exampleTimestamp,
+        editCount: 0,
+        deleted: false,
       })
       .onConflictDoNothing({
         target: posts.telegramMessageId,
@@ -45,7 +38,7 @@ export async function insertExamplePost() {
     if (inserted) {
       console.log("Inserted post:", inserted);
     } else {
-      console.log("Post already existed for telegram_message_id:", examplePost.telegramMessageId.toString());
+      console.log("Post already existed for telegram_message_id:", telegramMessageId.toString());
     }
   } finally {
     await pool.end();

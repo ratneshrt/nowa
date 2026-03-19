@@ -15,10 +15,9 @@ export const originEnum = pgEnum("origin_type", ["tg", "cli"]);
 
 export const posts = pgTable("posts", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
-  telegramMessageId: bigint("telegram_message_id", { mode: "number" })
-    .notNull()
-    .unique(),
-  authorTelegramId: bigint("author_telegram_id", { mode: "number" }).notNull(),
+  uid: text("uid").notNull().unique(),
+  telegramMessageId: bigint("telegram_message_id", { mode: "number" }).unique(),
+  authorTelegramId: bigint("author_telegram_id", { mode: "number" }),
   content: text("content").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
@@ -36,7 +35,7 @@ export const postVersions = pgTable(
       .references(() => posts.id, { onDelete: "cascade" }),
     editNumber: integer("edit_number").notNull(),
     contentSnapshot: text("content_snapshot").notNull(),
-    editedBy: bigint("edited_by", { mode: "number" }).notNull(),
+    editedBy: bigint("edited_by", { mode: "number" }),
     editedAt: timestamp("edited_at", { withTimezone: true }).notNull(),
     origin: originEnum("origin").notNull().default("cli"),
   },

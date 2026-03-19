@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { postVersions, posts } from "./schema";
@@ -9,8 +9,9 @@ type PostVersionRecord = typeof postVersions.$inferSelect;
 type PostEditRecord = PostVersionRecord & { isCurrent?: boolean };
 
 type InsertPostParams = {
-  telegramMessageId: number;
-  authorTelegramId: number;
+  uid: string;
+  telegramMessageId?: number;
+  authorTelegramId?: number;
   content: string;
   timestamp: Date;
   origin?: "tg" | "cli";
@@ -23,6 +24,13 @@ type UpdatePostParams = {
   editedAt: Date;
 };
 
+type UpdatePostByUidParams = {
+  uid: string;
+  newContent: string;
+  editedBy?: number;
+  editedAt: Date;
+};
+
 type DeletePostParams = {
   targetTelegramMessageId: number;
   deletedAt: Date;
@@ -32,6 +40,11 @@ type PostTotals = {
   total: number;
   visible: number;
   deleted: number;
+};
+
+type PaginatedPosts = {
+  posts: PostRecord[];
+  nextCursor: number | null;
 };
 
 type DrizzleDb = ReturnType<typeof drizzle>;
@@ -70,10 +83,6 @@ export async function shutdownDatabasePool(): Promise<void> {
   sharedDb = null;
 }
 
-/**
- * Opens a one-off pg client to verify whether the configured database is reachable.
- * Resolves if the connection and a simple `SELECT 1` succeed, otherwise rejects.
- */
 export async function verifyDatabaseConnection(): Promise<void> {
   const db = getDb();
   await db.execute(sql`select 1`);
@@ -84,22 +93,23 @@ export async function insertNewPost(
 ): Promise<PostRecord | null> {
   const db = getDb();
 
-  const [inserted] = await db
-    .insert(posts)
-    .values({
-      telegramMessageId: params.telegramMessageId,
-      authorTelegramId: params.authorTelegramId,
-      content: params.content,
-      createdAt: params.timestamp,
-      updatedAt: params.timestamp,
-      editCount: 0,
-      deleted: false,
-      origin: params.origin ?? "cli",
-    })
-    .onConflictDoNothing({
-      target: posts.telegramMessageId,
-    })
-    .returning();
+  const query = db.insert(posts).values({
+    uid: params.uid,
+    telegramMessageId: params.telegramMessageId ?? null,
+    authorTelegramId: params.authorTelegramId ?? null,
+    content: params.content,
+    createdAt: params.timestamp,
+    updatedAt: params.timestamp,
+    editCount: 0,
+    deleted: false,
+    origin: params.origin ?? "cli",
+  });
+
+  const [inserted] = params.telegramMessageId
+    ? await query
+        .onConflictDoNothing({ target: posts.telegramMessageId })
+        .returning()
+    : await query.returning();
 
   return inserted ?? null;
 }
@@ -112,6 +122,16 @@ export async function getPostByTelegramMessageId(
     .select()
     .from(posts)
     .where(eq(posts.telegramMessageId, messageId))
+    .limit(1);
+  return post ?? null;
+}
+
+export async function getPostByUid(uid: string): Promise<PostRecord | null> {
+  const db = getDb();
+  const [post] = await db
+    .select()
+    .from(posts)
+    .where(eq(posts.uid, uid))
     .limit(1);
   return post ?? null;
 }
@@ -155,6 +175,45 @@ export async function updatePostContent(
   });
 }
 
+export async function updatePostContentByUid(
+  params: UpdatePostByUidParams
+): Promise<PostRecord | null> {
+  const db = getDb();
+
+  return db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(posts)
+      .where(eq(posts.uid, params.uid))
+      .limit(1);
+
+    if (!existing || existing.deleted) {
+      return null;
+    }
+
+    await tx.insert(postVersions).values({
+      postId: existing.id,
+      editNumber: existing.editCount + 1,
+      contentSnapshot: existing.content,
+      editedBy: params.editedBy ?? null,
+      editedAt: params.editedAt,
+      origin: existing.origin,
+    });
+
+    const [updated] = await tx
+      .update(posts)
+      .set({
+        content: params.newContent,
+        updatedAt: params.editedAt,
+        editCount: existing.editCount + 1,
+      })
+      .where(eq(posts.id, existing.id))
+      .returning();
+
+    return updated ?? null;
+  });
+}
+
 export async function softDeletePost(
   params: DeletePostParams
 ): Promise<PostRecord | null> {
@@ -170,10 +229,71 @@ export async function softDeletePost(
   return deletedPost ?? null;
 }
 
+export async function softDeletePostByUid(
+  uid: string
+): Promise<PostRecord | null> {
+  const db = getDb();
+  const [deletedPost] = await db
+    .update(posts)
+    .set({
+      deleted: true,
+      updatedAt: new Date(),
+    })
+    .where(eq(posts.uid, uid))
+    .returning();
+  return deletedPost ?? null;
+}
+
+export async function restorePost(uid: string): Promise<PostRecord | null> {
+  const db = getDb();
+  const [restored] = await db
+    .update(posts)
+    .set({
+      deleted: false,
+      updatedAt: new Date(),
+    })
+    .where(eq(posts.uid, uid))
+    .returning();
+  return restored ?? null;
+}
+
 export async function getAllPosts(): Promise<PostRecord[]> {
   const db = getDb();
   const rows = await db.select().from(posts).orderBy(desc(posts.createdAt));
   return rows;
+}
+
+export async function getAllPostsPaginated(
+  limit: number,
+  cursor?: number
+): Promise<PaginatedPosts> {
+  const db = getDb();
+
+  const where = cursor ? lt(posts.id, cursor) : undefined;
+
+  const rows = await db
+    .select()
+    .from(posts)
+    .where(where)
+    .orderBy(desc(posts.id))
+    .limit(limit + 1);
+
+  const hasMore = rows.length > limit;
+  const data = hasMore ? rows.slice(0, limit) : rows;
+  const nextCursor = hasMore ? data[data.length - 1].id : null;
+
+  return { posts: data, nextCursor };
+}
+
+export async function getLastPosts(n: number): Promise<PostRecord[]> {
+  const db = getDb();
+  const count = Math.min(Math.max(1, n), 10);
+  return db
+    .select()
+    .from(posts)
+    .where(eq(posts.deleted, false))
+    .orderBy(desc(posts.createdAt))
+    .limit(count);
 }
 
 export async function getAllEdits(
@@ -187,6 +307,7 @@ export async function getAllEdits(
       editCount: posts.editCount,
       authorTelegramId: posts.authorTelegramId,
       updatedAt: posts.updatedAt,
+      origin: posts.origin,
     })
     .from(posts)
     .where(eq(posts.telegramMessageId, telegramMessageId))
@@ -207,8 +328,50 @@ export async function getAllEdits(
     postId: post.id,
     editNumber: post.editCount + 1,
     contentSnapshot: post.content,
-    editedBy: post.authorTelegramId,
+    editedBy: post.authorTelegramId ?? null,
     editedAt: post.updatedAt,
+    origin: post.origin,
+    isCurrent: true,
+  };
+
+  return [currentVersion, ...versions];
+}
+
+export async function getAllEditsByUid(
+  uid: string
+): Promise<PostEditRecord[]> {
+  const db = getDb();
+  const [post] = await db
+    .select({
+      id: posts.id,
+      content: posts.content,
+      editCount: posts.editCount,
+      authorTelegramId: posts.authorTelegramId,
+      updatedAt: posts.updatedAt,
+      origin: posts.origin,
+    })
+    .from(posts)
+    .where(eq(posts.uid, uid))
+    .limit(1);
+
+  if (!post) {
+    return [];
+  }
+
+  const versions = await db
+    .select()
+    .from(postVersions)
+    .where(eq(postVersions.postId, post.id))
+    .orderBy(desc(postVersions.editNumber));
+
+  const currentVersion: PostEditRecord = {
+    id: post.id,
+    postId: post.id,
+    editNumber: post.editCount + 1,
+    contentSnapshot: post.content,
+    editedBy: post.authorTelegramId ?? null,
+    editedAt: post.updatedAt,
+    origin: post.origin,
     isCurrent: true,
   };
 

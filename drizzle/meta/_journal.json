@@ -29,6 +29,20 @@
       "when": 1773098244752,
       "tag": "0003_remarkable_rumiko_fujikawa",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1773876794440,
+      "tag": "0004_far_zombie",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1773876930371,
+      "tag": "0005_free_edwin_jarvis",
+      "breakpoints": true
     }
   ]
 }
