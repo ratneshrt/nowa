@@ -1,7 +1,14 @@
 import { and, desc, eq, lt, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/neon-http";
-import { neon } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-serverless";
+import { Pool, neonConfig } from "@neondatabase/serverless";
 import { postVersions, posts } from "./schema";
+
+// In Node.js (local dev), inject the ws package as the WebSocket implementation.
+// In CF Workers, globalThis.WebSocket is natively available so this block is skipped.
+if (typeof globalThis.WebSocket === "undefined") {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  neonConfig.webSocketConstructor = require("ws");
+}
 
 type PostRecord = typeof posts.$inferSelect;
 type PostVersionRecord = typeof postVersions.$inferSelect;
@@ -48,6 +55,7 @@ type PaginatedPosts = {
 
 type DrizzleDb = ReturnType<typeof drizzle>;
 
+let sharedPool: Pool | null = null;
 let sharedDb: DrizzleDb | null = null;
 
 function requireDatabaseUrl(): string {
@@ -66,7 +74,8 @@ function getDb(): DrizzleDb {
   }
 
   const databaseUrl = requireDatabaseUrl();
-  sharedDb = drizzle(neon(databaseUrl));
+  sharedPool = new Pool({ connectionString: databaseUrl });
+  sharedDb = drizzle(sharedPool);
   return sharedDb;
 }
 
@@ -75,10 +84,13 @@ function getDb(): DrizzleDb {
 // every request (returns immediately if already initialized).
 export function initDb(connectionString: string): void {
   if (sharedDb) return;
-  sharedDb = drizzle(neon(connectionString));
+  sharedPool = new Pool({ connectionString });
+  sharedDb = drizzle(sharedPool);
 }
 
 export async function shutdownDatabasePool(): Promise<void> {
+  await sharedPool?.end();
+  sharedPool = null;
   sharedDb = null;
 }
 
@@ -268,7 +280,33 @@ export async function getAllPostsPaginated(
 ): Promise<PaginatedPosts> {
   const db = getDb();
 
-  const where = cursor ? lt(posts.id, cursor) : undefined;
+  const conditions = [eq(posts.deleted, false)];
+  if (cursor) conditions.push(lt(posts.id, cursor));
+  const where = and(...conditions);
+
+  const rows = await db
+    .select()
+    .from(posts)
+    .where(where)
+    .orderBy(desc(posts.id))
+    .limit(limit + 1);
+
+  const hasMore = rows.length > limit;
+  const data = hasMore ? rows.slice(0, limit) : rows;
+  const nextCursor = hasMore ? data[data.length - 1].id : null;
+
+  return { posts: data, nextCursor };
+}
+
+export async function getDeletedPostsPaginated(
+  limit: number,
+  cursor?: number
+): Promise<PaginatedPosts> {
+  const db = getDb();
+
+  const conditions = [eq(posts.deleted, true)];
+  if (cursor) conditions.push(lt(posts.id, cursor));
+  const where = and(...conditions);
 
   const rows = await db
     .select()
@@ -291,6 +329,17 @@ export async function getLastPosts(n: number): Promise<PostRecord[]> {
     .select()
     .from(posts)
     .where(eq(posts.deleted, false))
+    .orderBy(desc(posts.createdAt))
+    .limit(count);
+}
+
+export async function getLastDeletedPosts(n: number): Promise<PostRecord[]> {
+  const db = getDb();
+  const count = Math.min(Math.max(1, n), 10);
+  return db
+    .select()
+    .from(posts)
+    .where(eq(posts.deleted, true))
     .orderBy(desc(posts.createdAt))
     .limit(count);
 }

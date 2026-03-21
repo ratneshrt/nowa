@@ -4,6 +4,7 @@ import { createBot } from "./bot/bot-core";
 import {
   getAllEditsByUid,
   getAllPostsPaginated,
+  getDeletedPostsPaginated,
   getLastPosts,
   getPostByUid,
   getPostTotals,
@@ -79,6 +80,16 @@ app.get("/posts/last", async (c) => {
   const n = Math.min(Math.max(1, parseInt(nParam ?? "1", 10)), 10);
   const posts = await getLastPosts(n);
   return c.json({ posts });
+});
+
+// GET /posts/trash — paginated list of deleted posts; must be before /posts/:uid
+app.get("/posts/trash", async (c) => {
+  const limitParam = c.req.query("limit");
+  const cursorParam = c.req.query("cursor");
+  const limit = Math.min(Math.max(1, parseInt(limitParam ?? "20", 10)), 100);
+  const cursor = cursorParam ? parseInt(cursorParam, 10) : undefined;
+  const result = await getDeletedPostsPaginated(limit, cursor);
+  return c.json(result);
 });
 
 // GET /posts/:uid
