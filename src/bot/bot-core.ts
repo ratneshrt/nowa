@@ -2,8 +2,10 @@ import "dotenv/config";
 import { nanoid } from "nanoid";
 import { Telegraf, Context } from "telegraf";
 import {
+  getLastDeletedPosts,
   getLastPosts,
   getPostByUid,
+  getPostTotals,
   insertNewPost,
   restorePost,
   softDeletePost,
@@ -25,7 +27,7 @@ function parseAllowedUsernames(raw: string): AllowedUserMap {
   return map;
 }
 
-const KNOWN_COMMANDS = new Set(["delete", "which", "last", "restore"]);
+const KNOWN_COMMANDS = new Set(["delete", "which", "last", "restore", "trash", "stats"]);
 
 type ReferenceableMessage = {
   message_id: number;
@@ -280,6 +282,31 @@ function attachMessageHandlers(bot: Telegraf, allowedUsers: AllowedUserMap): voi
             ? `${restored.uid} | restored`
             : "error | post not found";
           await sendMessage(ctx, chatId, incomingMessage.message_id, response);
+          return;
+        }
+
+        if (commandName === "stats") {
+          const totals = await getPostTotals();
+          response = `total : ${totals.total}\ndeleted : ${totals.deleted}\nvisible : ${totals.visible}`;
+          await sendMessage(ctx, chatId, incomingMessage.message_id, response);
+          return;
+        }
+
+        if (commandName === "trash") {
+          const n = commandArg ? Math.min(parseInt(commandArg, 10) || 1, 10) : 1;
+          const deletedPosts = await getLastDeletedPosts(n);
+          if (deletedPosts.length === 0) {
+            await sendMessage(ctx, chatId, incomingMessage.message_id, "no deleted posts");
+            return;
+          }
+          for (const post of deletedPosts) {
+            await sendMessage(
+              ctx,
+              chatId,
+              incomingMessage.message_id,
+              formatPostMessage(post.content, post.createdAt, post.uid)
+            );
+          }
           return;
         }
       } else if (replyTarget) {
