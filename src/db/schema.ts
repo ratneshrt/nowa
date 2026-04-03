@@ -23,7 +23,7 @@ export const posts = pgTable("posts", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   editCount: integer("edit_count").notNull().default(0),
   deleted: boolean("deleted").notNull().default(false),
-  origin: originEnum("origin").notNull().default("cli"),
+  origin: originEnum("origin"),
 });
 
 export const postVersions = pgTable(
@@ -37,7 +37,7 @@ export const postVersions = pgTable(
     contentSnapshot: text("content_snapshot").notNull(),
     editedBy: bigint("edited_by", { mode: "number" }),
     editedAt: timestamp("edited_at", { withTimezone: true }).notNull(),
-    origin: originEnum("origin").notNull().default("cli"),
+    origin: originEnum("origin"),
   },
   (table) => ({
     editSequenceIdx: uniqueIndex("post_versions_post_id_edit_number_idx").on(

@@ -21,7 +21,7 @@ type InsertPostParams = {
   authorTelegramId?: number;
   content: string;
   timestamp: Date;
-  origin?: "tg" | "cli";
+  origin: "tg" | "cli";
 };
 
 type UpdatePostParams = {
@@ -114,7 +114,7 @@ export async function insertNewPost(
     updatedAt: params.timestamp,
     editCount: 0,
     deleted: false,
-    origin: params.origin ?? "cli",
+    origin: params.origin,
   });
 
   const [inserted] = params.telegramMessageId
