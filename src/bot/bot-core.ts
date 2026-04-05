@@ -31,6 +31,7 @@ const KNOWN_COMMANDS = new Set(["delete", "which", "last", "restore", "trash", "
 
 type ReferenceableMessage = {
   message_id: number;
+  text?: string;
   date?: number;
   reply_to_message?: ReferenceableMessage;
 };
@@ -317,15 +318,34 @@ function attachMessageHandlers(bot: Telegraf, allowedUsers: AllowedUserMap): voi
         } else if (typeof editorId !== "number") {
           response = "error | missing editor id";
         } else {
-          const edited = await updatePostContent({
-            targetTelegramMessageId: replyTarget.message_id,
-            newContent,
-            editedBy: editorId,
-            editedAt:
-              typeof incomingMessage.date === "number"
-                ? new Date(incomingMessage.date * 1000)
-                : new Date(),
-          });
+          const editedAt =
+            typeof incomingMessage.date === "number"
+              ? new Date(incomingMessage.date * 1000)
+              : new Date();
+
+          // To edit: reply to your own original status message.
+          // We look up the post by the replied-to message's telegram_message_id.
+          // Also support replying to /last output (uid at end: "content\n-- time | uid")
+          const replyText = replyTarget.text ?? "";
+          const uidFromEnd = replyText.match(/\|\s*([A-Za-z0-9_-]+)\s*$/m)?.[1] ?? null;
+
+          let edited;
+          if (uidFromEnd) {
+            edited = await updatePostContentByUid({
+              uid: uidFromEnd,
+              newContent,
+              editedBy: editorId,
+              editedAt,
+            });
+          } else {
+            // Reply to own original message → look up by telegram_message_id
+            edited = await updatePostContent({
+              targetTelegramMessageId: replyTarget.message_id,
+              newContent,
+              editedBy: editorId,
+              editedAt,
+            });
+          }
           response = edited ? `${edited.uid} | updated` : "error | post not found";
         }
         await sendMessage(ctx, chatId, incomingMessage.message_id, response);

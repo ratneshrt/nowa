@@ -1,6 +1,6 @@
 import "dotenv/config";
 
-const PROD_BASE = "https://api.pranitmane.com";
+const PROD_BASE = "https://api.ratne.sh";
 const EXPECTED_WEBHOOK_URL = `${PROD_BASE}/webhook`;
 const RECENT_ERROR_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 

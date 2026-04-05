@@ -153,38 +153,36 @@ export async function updatePostContent(
 ): Promise<PostRecord | null> {
   const db = getDb();
 
-  return db.transaction(async (tx) => {
-    const [existing] = await tx
-      .select()
-      .from(posts)
-      .where(eq(posts.telegramMessageId, params.targetTelegramMessageId))
-      .limit(1);
+  // No transaction — Neon HTTP driver doesn't support them in CF Workers.
+  // Sequential queries are safe here (single-user bot).
+  const [existing] = await db
+    .select()
+    .from(posts)
+    .where(eq(posts.telegramMessageId, params.targetTelegramMessageId))
+    .limit(1);
 
-    if (!existing || existing.deleted) {
-      return null;
-    }
+  if (!existing || existing.deleted) return null;
 
-    await tx.insert(postVersions).values({
-      postId: existing.id,
-      editNumber: existing.editCount + 1,
-      contentSnapshot: existing.content,
-      editedBy: params.editedBy,
-      editedAt: params.editedAt,
-      origin: existing.origin,
-    });
-
-    const [updated] = await tx
-      .update(posts)
-      .set({
-        content: params.newContent,
-        updatedAt: params.editedAt,
-        editCount: existing.editCount + 1,
-      })
-      .where(eq(posts.id, existing.id))
-      .returning();
-
-    return updated ?? null;
+  await db.insert(postVersions).values({
+    postId: existing.id,
+    editNumber: existing.editCount + 1,
+    contentSnapshot: existing.content,
+    editedBy: params.editedBy,
+    editedAt: params.editedAt,
+    origin: existing.origin,
   });
+
+  const [updated] = await db
+    .update(posts)
+    .set({
+      content: params.newContent,
+      updatedAt: params.editedAt,
+      editCount: existing.editCount + 1,
+    })
+    .where(eq(posts.id, existing.id))
+    .returning();
+
+  return updated ?? null;
 }
 
 export async function updatePostContentByUid(
@@ -192,38 +190,34 @@ export async function updatePostContentByUid(
 ): Promise<PostRecord | null> {
   const db = getDb();
 
-  return db.transaction(async (tx) => {
-    const [existing] = await tx
-      .select()
-      .from(posts)
-      .where(eq(posts.uid, params.uid))
-      .limit(1);
+  const [existing] = await db
+    .select()
+    .from(posts)
+    .where(eq(posts.uid, params.uid))
+    .limit(1);
 
-    if (!existing || existing.deleted) {
-      return null;
-    }
+  if (!existing || existing.deleted) return null;
 
-    await tx.insert(postVersions).values({
-      postId: existing.id,
-      editNumber: existing.editCount + 1,
-      contentSnapshot: existing.content,
-      editedBy: params.editedBy ?? null,
-      editedAt: params.editedAt,
-      origin: existing.origin,
-    });
-
-    const [updated] = await tx
-      .update(posts)
-      .set({
-        content: params.newContent,
-        updatedAt: params.editedAt,
-        editCount: existing.editCount + 1,
-      })
-      .where(eq(posts.id, existing.id))
-      .returning();
-
-    return updated ?? null;
+  await db.insert(postVersions).values({
+    postId: existing.id,
+    editNumber: existing.editCount + 1,
+    contentSnapshot: existing.content,
+    editedBy: params.editedBy ?? null,
+    editedAt: params.editedAt,
+    origin: existing.origin,
   });
+
+  const [updated] = await db
+    .update(posts)
+    .set({
+      content: params.newContent,
+      updatedAt: params.editedAt,
+      editCount: existing.editCount + 1,
+    })
+    .where(eq(posts.id, existing.id))
+    .returning();
+
+  return updated ?? null;
 }
 
 export async function softDeletePost(
