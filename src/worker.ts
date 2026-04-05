@@ -115,12 +115,14 @@ app.post("/posts", async (c) => {
   if (!body || typeof body.content !== "string" || !body.content.trim()) {
     return c.json({ error: "content is required" }, 400);
   }
+  const allowedOrigins = ["tg", "cli", "web"] as const;
+  const origin = allowedOrigins.includes(body.origin) ? body.origin : "cli";
   const uid = nanoid(10);
   const post = await insertNewPost({
     uid,
     content: body.content.trim(),
     timestamp: new Date(),
-    origin: "cli",
+    origin,
   });
   if (!post) return c.json({ error: "failed to insert post" }, 500);
   return c.json(post, 201);

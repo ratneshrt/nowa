@@ -11,7 +11,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
-export const originEnum = pgEnum("origin_type", ["tg", "cli"]);
+export const originEnum = pgEnum("origin_type", ["tg", "cli", "web"]);
 
 export const posts = pgTable("posts", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
