@@ -9,14 +9,15 @@ if (!TOKEN) {
   process.exit(1);
 }
 
-async function api(method: string, path: string, body?: object) {
+async function api(method: string, path: string, body?: object | FormData) {
+  const isForm = body instanceof FormData;
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${TOKEN}`,
-      ...(body ? { "Content-Type": "application/json" } : {}),
+      ...(body && !isForm ? { "Content-Type": "application/json" } : {}),
     },
-    body: body ? JSON.stringify(body) : undefined,
+    body: isForm ? body : body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
     const text = await res.text();
@@ -166,6 +167,47 @@ async function cmdRestore(args: string[]) {
   console.log(`${uid} | restored`);
 }
 
+async function cmdSnap(args: string[]) {
+  const [path, ...captionWords] = args;
+  if (!path) {
+    console.error("Error: image path required. Usage: nowa snap <image> [caption...]");
+    process.exit(1);
+  }
+  const { readFile } = await import("node:fs/promises");
+  const bytes = await readFile(path).catch(() => {
+    console.error(`Error: could not read ${path}`);
+    process.exit(1);
+  });
+  const form = new FormData();
+  form.append("file", new Blob([bytes]), path.split("/").pop());
+  form.append("origin", "cli");
+  const caption = captionWords.join(" ").trim();
+  if (caption) form.append("caption", caption);
+  const data = await api("POST", "/moments", form);
+  console.log(`${data.uid} | moment posted`);
+}
+
+async function cmdMoments() {
+  const data = await api("GET", "/moments?n=4");
+  const moments: any[] = data.moments ?? [];
+  if (moments.length === 0) { console.log("No moments yet."); return; }
+  moments.forEach((m, i) => {
+    if (i > 0) console.log();
+    console.log(m.caption ?? "(no caption)");
+    console.log(`-- ${formatDate(m.createdAt)} | ${m.uid} | ${m.origin} | ${m.width}x${m.height}`);
+  });
+}
+
+async function cmdUnsnap(args: string[]) {
+  const uid = args[0];
+  if (!uid) {
+    console.error("Error: uid required. Usage: nowa unsnap <uid>");
+    process.exit(1);
+  }
+  await api("DELETE", `/moments/${uid}`);
+  console.log(`${uid} | moment deleted`);
+}
+
 function showHelp() {
   console.log(`nowa — post and manage now-entries from the terminal
 
@@ -180,6 +222,9 @@ Usage:
   nowa edit <uid> <text...>  update a post's content
   nowa delete <uid>          soft-delete a post
   nowa restore <uid>         restore a deleted post
+  nowa snap <img> [caption]  post a photo moment (jpeg/png/webp)
+  nowa moments               list the moments on the home page
+  nowa unsnap <uid>          delete a moment (removes the image)
   nowa -h, --help            show this help
 
 Environment variables:
@@ -190,7 +235,8 @@ Examples:
   nowa back at chaayos again
   nowa last 3
   nowa edit abc123 updated content here
-  nowa delete abc123`);
+  nowa delete abc123
+  nowa snap ~/pics/sunset.jpg chai and a sunset`);
 }
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -215,6 +261,12 @@ if (!cmd || cmd === "-h" || cmd === "--help") {
   cmdDelete(rest);
 } else if (cmd === "restore") {
   cmdRestore(rest);
+} else if (cmd === "snap") {
+  cmdSnap(rest);
+} else if (cmd === "moments") {
+  cmdMoments();
+} else if (cmd === "unsnap") {
+  cmdUnsnap(rest);
 } else {
   cmdPost([cmd, ...rest]);
 }

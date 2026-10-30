@@ -57,3 +57,22 @@ export const postVersionsRelations = relations(postVersions, ({ one }) => ({
     references: [posts.id],
   }),
 }));
+
+// Photo "moments" shown on the portfolio home page. The image itself lives in
+// R2 under `r2Key`; `purgedAt` is set once that object has been removed by the
+// retention cron (the row is kept so history/timestamps survive).
+export const moments = pgTable("moments", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  uid: text("uid").notNull().unique(),
+  r2Key: text("r2_key").notNull(),
+  width: integer("width").notNull(),
+  height: integer("height").notNull(),
+  caption: text("caption"),
+  lqip: text("lqip"),
+  telegramMessageId: bigint("telegram_message_id", { mode: "number" }).unique(),
+  origin: originEnum("origin"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  deleted: boolean("deleted").notNull().default(false),
+  purgedAt: timestamp("purged_at", { withTimezone: true }),
+});

@@ -6,3 +6,16 @@ compatibility_flags = ["nodejs_compat"]
 routes = [
   { pattern = "api.ratne.sh", custom_domain = true }
 ]
+
+# Photo moments — bucket is served publicly at https://mom.ratne.sh
+[[r2_buckets]]
+binding = "MOMENTS"
+bucket_name = "moments"
+
+[vars]
+SITE_URL = "https://www.ratne.sh"
+# Days a moment's image is kept in R2 after it rotates off the home page.
+MOMENTS_RETENTION_DAYS = "30"
+
+[triggers]
+crons = ["30 21 * * *"] # 03:00 IST daily

@@ -4,14 +4,26 @@ import { Telegraf, Context } from "telegraf";
 import {
   getLastDeletedPosts,
   getLastPosts,
+  getMomentByTelegramMessageId,
+  getMomentByUid,
   getPostByUid,
   getPostTotals,
   insertNewPost,
   restorePost,
   softDeletePost,
   softDeletePostByUid,
+  updateMomentCaption,
   updatePostContent,
+  updatePostContentByUid,
 } from "../db/db-ops";
+import { toDataUrl } from "../moments/image";
+import {
+  MomentDeps,
+  MomentError,
+  createMoment,
+  normaliseCaption,
+  removeMoment,
+} from "../moments/moments";
 
 type AllowedUserMap = Record<string, true>;
 
@@ -167,7 +179,33 @@ async function sendMessage(
   } as Record<string, unknown>);
 }
 
-function attachMessageHandlers(bot: Telegraf, allowedUsers: AllowedUserMap): void {
+async function downloadTelegramFile(
+  ctx: Context,
+  botToken: string,
+  fileId: string
+): Promise<Uint8Array> {
+  const file = await ctx.telegram.getFile(fileId);
+  if (!file.file_path) throw new Error("telegram returned no file_path");
+  const res = await fetch(`https://api.telegram.org/file/bot${botToken}/${file.file_path}`);
+  if (!res.ok) throw new Error(`telegram file download failed: ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+// A reply targets a moment if it replies to the photo itself, or to the bot's
+// "<uid> | moment posted" confirmation.
+async function findRepliedMoment(target: ReferenceableMessage) {
+  const byMessage = await getMomentByTelegramMessageId(target.message_id);
+  if (byMessage) return byMessage;
+  const uid = target.text?.match(/^([A-Za-z0-9_-]{10}) \| moment/)?.[1];
+  return uid ? getMomentByUid(uid) : null;
+}
+
+function attachMessageHandlers(
+  bot: Telegraf,
+  allowedUsers: AllowedUserMap,
+  botToken: string,
+  moments?: MomentDeps
+): void {
   bot.on("message", async (ctx) => {
     if (!isUserAllowed(ctx, allowedUsers)) {
       console.warn(
@@ -201,6 +239,36 @@ function attachMessageHandlers(bot: Telegraf, allowedUsers: AllowedUserMap): voi
     let response = "no action taken";
 
     try {
+      if ("photo" in incomingMessage && incomingMessage.photo.length > 0) {
+        if (!moments) {
+          response = "error | moments are not available in this environment";
+        } else {
+          const sizes = incomingMessage.photo;
+          const full = sizes[sizes.length - 1];
+          const thumb = sizes[0];
+          // Telegram's smallest rendition (~90px) doubles as the blur-up placeholder.
+          const [bytes, thumbBytes] = await Promise.all([
+            downloadTelegramFile(ctx, botToken, full.file_id),
+            thumb.file_unique_id !== full.file_unique_id
+              ? downloadTelegramFile(ctx, botToken, thumb.file_id)
+              : Promise.resolve(null),
+          ]);
+          const row = await createMoment(moments, {
+            bytes,
+            caption: normaliseCaption(incomingMessage.caption),
+            lqip: thumbBytes ? toDataUrl(thumbBytes, "image/jpeg") : null,
+            origin: "tg",
+            telegramMessageId: incomingMessage.message_id,
+            timestamp: new Date(incomingMessage.date * 1000),
+          });
+          response = row
+            ? `${row.uid} | moment posted`
+            : "error | moment already exists for this message";
+        }
+        await sendMessage(ctx, chatId, incomingMessage.message_id, response);
+        return;
+      }
+
       if (isCommandMessage(ctx)) {
         const commandName = parseCommandName(ctx);
         const commandArg = parseCommandArg(ctx);
@@ -214,11 +282,19 @@ function attachMessageHandlers(bot: Telegraf, allowedUsers: AllowedUserMap): voi
         if (commandName === "delete") {
           if (commandArg) {
             const deleted = await softDeletePostByUid(commandArg);
+            const deletedMoment =
+              !deleted && moments ? await removeMoment(moments, commandArg) : null;
             response = deleted
               ? `${deleted.uid} | deleted`
-              : "error | post not found";
+              : deletedMoment
+                ? `${deletedMoment.uid} | moment deleted`
+                : "error | post not found";
           } else if (replyTarget) {
-            if (!isOriginalPostReference(replyTarget)) {
+            const repliedMoment = moments ? await findRepliedMoment(replyTarget) : null;
+            if (repliedMoment && moments) {
+              await removeMoment(moments, repliedMoment.uid);
+              response = `${repliedMoment.uid} | moment deleted`;
+            } else if (!isOriginalPostReference(replyTarget)) {
               response = "error | reply to the original post to delete";
             } else {
               const deleted = await softDeletePost({
@@ -313,6 +389,23 @@ function attachMessageHandlers(bot: Telegraf, allowedUsers: AllowedUserMap): voi
       } else if (replyTarget) {
         const newContent = getMessageText(incomingMessage);
         const editorId = ctx.from?.id;
+        const repliedMoment = moments ? await findRepliedMoment(replyTarget) : null;
+        if (repliedMoment && moments) {
+          if (!newContent) {
+            response = "error | caption reply must include text";
+          } else {
+            const updated = await updateMomentCaption(
+              repliedMoment.uid,
+              normaliseCaption(newContent)
+            );
+            if (updated) await moments.notifySite();
+            response = updated
+              ? `${updated.uid} | moment caption updated`
+              : "error | moment not found";
+          }
+          await sendMessage(ctx, chatId, incomingMessage.message_id, response);
+          return;
+        }
         if (!newContent) {
           response = "error | edit reply must include text content";
         } else if (typeof editorId !== "number") {
@@ -381,6 +474,10 @@ function attachMessageHandlers(bot: Telegraf, allowedUsers: AllowedUserMap): voi
         return;
       }
     } catch (error) {
+      if (error instanceof MomentError) {
+        await sendMessage(ctx, chatId, incomingMessage.message_id, `error | ${error.message}`);
+        return;
+      }
       console.error("Failed to process message:", error);
       response = "error | internal error, please retry";
       await sendMessage(ctx, chatId, incomingMessage.message_id, response);
@@ -391,10 +488,14 @@ function attachMessageHandlers(bot: Telegraf, allowedUsers: AllowedUserMap): voi
 // For production (CF Workers webhook mode): create a configured bot instance
 // without starting long polling. The caller is responsible for calling
 // bot.handleUpdate(update) per incoming Telegram update.
-export function createBot(token: string, allowedUsernamesStr: string): Telegraf {
+export function createBot(
+  token: string,
+  allowedUsernamesStr: string,
+  moments?: MomentDeps
+): Telegraf {
   const allowedUsers = parseAllowedUsernames(allowedUsernamesStr);
   const bot = new Telegraf(token);
-  attachMessageHandlers(bot, allowedUsers);
+  attachMessageHandlers(bot, allowedUsers, token, moments);
   return bot;
 }
 
@@ -409,7 +510,7 @@ export async function startLoggingBot(): Promise<void> {
 
   const allowedUsers = parseAllowedUsernames(process.env.ALLOWED_USERNAMES ?? "");
   const bot = new Telegraf(botToken);
-  attachMessageHandlers(bot, allowedUsers);
+  attachMessageHandlers(bot, allowedUsers, botToken);
 
   await bot.launch();
   console.log("Telegraf bot is running (long polling). Press Ctrl+C to stop.");

@@ -1,8 +1,8 @@
-import { and, desc, eq, lt, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, notInArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { drizzle as drizzleHttp } from "drizzle-orm/neon-http";
 import { Pool, neonConfig, neon } from "@neondatabase/serverless";
-import { postVersions, posts } from "./schema";
+import { moments, postVersions, posts } from "./schema";
 
 // In Node.js (local dev), inject the ws package as the WebSocket implementation.
 // In CF Workers, globalThis.WebSocket is natively available so this block is skipped.
@@ -434,4 +434,133 @@ export async function getPostTotals(): Promise<PostTotals> {
   const deleted = counts?.deleted ?? 0;
   const visible = total - deleted;
   return { total, deleted, visible };
+}
+
+// ── Moments ────────────────────────────────────────────────────────────
+
+type MomentRecord = typeof moments.$inferSelect;
+
+type InsertMomentParams = {
+  uid: string;
+  r2Key: string;
+  width: number;
+  height: number;
+  caption: string | null;
+  lqip: string | null;
+  telegramMessageId?: number;
+  origin: "tg" | "cli" | "web";
+  timestamp: Date;
+};
+
+export async function insertMoment(
+  params: InsertMomentParams
+): Promise<MomentRecord | null> {
+  const db = getDb();
+  const [inserted] = await db
+    .insert(moments)
+    .values({
+      uid: params.uid,
+      r2Key: params.r2Key,
+      width: params.width,
+      height: params.height,
+      caption: params.caption,
+      lqip: params.lqip,
+      telegramMessageId: params.telegramMessageId ?? null,
+      origin: params.origin,
+      createdAt: params.timestamp,
+      updatedAt: params.timestamp,
+    })
+    .onConflictDoNothing({ target: moments.telegramMessageId })
+    .returning();
+  return inserted ?? null;
+}
+
+export async function getLatestMoments(n: number): Promise<MomentRecord[]> {
+  const db = getDb();
+  const count = Math.min(Math.max(1, n), 12);
+  return db
+    .select()
+    .from(moments)
+    .where(and(eq(moments.deleted, false), isNull(moments.purgedAt)))
+    .orderBy(desc(moments.createdAt))
+    .limit(count);
+}
+
+export async function getMomentByUid(uid: string): Promise<MomentRecord | null> {
+  const db = getDb();
+  const [row] = await db.select().from(moments).where(eq(moments.uid, uid)).limit(1);
+  return row ?? null;
+}
+
+export async function getMomentByTelegramMessageId(
+  messageId: number
+): Promise<MomentRecord | null> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(moments)
+    .where(eq(moments.telegramMessageId, messageId))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function updateMomentCaption(
+  uid: string,
+  caption: string | null
+): Promise<MomentRecord | null> {
+  const db = getDb();
+  const [updated] = await db
+    .update(moments)
+    .set({ caption, updatedAt: new Date() })
+    .where(and(eq(moments.uid, uid), eq(moments.deleted, false)))
+    .returning();
+  return updated ?? null;
+}
+
+// Marks the moment deleted and purged in one go — the caller removes the R2
+// object, so there is nothing left to restore.
+export async function deleteMoment(uid: string): Promise<MomentRecord | null> {
+  const db = getDb();
+  const now = new Date();
+  const [deleted] = await db
+    .update(moments)
+    .set({ deleted: true, purgedAt: now, updatedAt: now })
+    .where(and(eq(moments.uid, uid), eq(moments.deleted, false)))
+    .returning();
+  return deleted ?? null;
+}
+
+// Moments that have rotated off the home page (not in the newest `keep`) and
+// are older than `olderThan`, whose R2 object still exists.
+export async function getPurgeableMoments(
+  keep: number,
+  olderThan: Date
+): Promise<MomentRecord[]> {
+  const db = getDb();
+  const newest = db
+    .select({ id: moments.id })
+    .from(moments)
+    .where(eq(moments.deleted, false))
+    .orderBy(desc(moments.createdAt))
+    .limit(keep);
+
+  return db
+    .select()
+    .from(moments)
+    .where(
+      and(
+        isNull(moments.purgedAt),
+        lt(moments.createdAt, olderThan),
+        notInArray(moments.id, newest)
+      )
+    );
+}
+
+export async function markMomentsPurged(ids: number[]): Promise<void> {
+  if (ids.length === 0) return;
+  const db = getDb();
+  await db
+    .update(moments)
+    .set({ purgedAt: new Date() })
+    .where(inArray(moments.id, ids));
 }
