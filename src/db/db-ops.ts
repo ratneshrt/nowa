@@ -477,7 +477,7 @@ export async function insertMoment(
 
 export async function getLatestMoments(n: number): Promise<MomentRecord[]> {
   const db = getDb();
-  const count = Math.min(Math.max(1, n), 12);
+  const count = Math.min(Math.max(1, n), 200);
   return db
     .select()
     .from(moments)

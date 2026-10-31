@@ -54,8 +54,9 @@ function momentDeps(env: Env): MomentDeps {
           },
           body: JSON.stringify({ tag: "moments" }),
         });
-        // Re-render the home page now so no visitor pays for the cache miss.
-        await fetch(env.SITE_URL, { headers: { "User-Agent": "nowa-warmup" } });
+        // Re-render the pages now so no visitor pays for the cache miss.
+        const warm = { headers: { "User-Agent": "nowa-warmup" } };
+        await Promise.all([fetch(env.SITE_URL, warm), fetch(`${env.SITE_URL}/moments`, warm)]);
       } catch (error) {
         console.error("Failed to notify site of moment change:", error);
       }
